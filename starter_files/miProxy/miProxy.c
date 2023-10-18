@@ -63,6 +63,33 @@ int get_listen_socket(struct sockaddr_in *address, int port)
     return server_socket;
 }
 
+int get_server_socket(struct sockaddr_in *address, char *hostname, int port) {
+    
+    int yes = 1;
+    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_socket <= 0) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    address->sin_family = AF_INET;
+    address->sin_port = htons(port);
+    
+    int success = setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    if (success < 0) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    if (inet_pton(AF_INET, hostname, &(address->sin_addr)) <= 0) {
+        perror("inet_pton");
+        close(server_socket);
+        exit(EXIT_FAILURE);
+    }
+
+    return server_socket;
+}
+
 int main(int argc, char *argv[])
 {
     int use_dns = 0;
@@ -224,6 +251,56 @@ int main(int argc, char *argv[])
         if (FD_ISSET(proxy_listen_socket, &readfds))
         {
             // TODO: write your code here
+            int browser_listen_socket = accept(proxy_listen_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
+            if (browser_listen_socket == -1) {
+                perror("accept");
+            }
+
+    
+            // Indicate the available positions of client sockets and server socket
+            int cli_socket_index = -1, ser_socket_index = -1; 
+
+
+            for (int i = 0; i < MAXCLIENTS; i++) {
+                if(client_sockets[i] == 0) {
+                    cli_socket_index = i;
+                    break;
+                }
+            }
+
+            for (int i = 0; i < MAXCLIENTS; i++) {
+                if(server_sockets[i] == 0) {
+                    ser_socket_index = i;
+                    break;
+                }
+            }
+
+            if ((cli_socket_index == -1)||(ser_socket_index == -1)) {
+
+                if(cli_socket_index == -1) 
+                    perror("Clinet sockets are full");
+                if(ser_socket_index == -1)
+                    perror("Server sockets are full");
+            }
+            else {
+                //Create a new connection to web server
+                struct sockaddr_in address1;
+                int server_socket;
+                server_socket = get_server_socket(&address1, server_file, 80);
+
+                if (server_socket < 0) {
+                    fprintf(stderr, "unknown host\n");
+                    return -1;
+                }
+
+                if(connect(server_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+                    perror("Error connecting server_socket");
+                }
+
+                client_sockets[cli_socket_index] = browser_listen_socket;
+                server_sockets[ser_socket_index] = server_socket;
+            }
+           
         }
         // ===================END OF listen socket========================
         // ===============================================================
@@ -238,6 +315,25 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++)
         {
             // TODO: write your code here
+            if (FD_ISSET(client_sockets[i], &readfds)) {
+
+                if((valread = recv(client_sockets[i], buffer, sizeof buffer, 0)) <= 0) {
+                    // got error or connection closed by client
+                    if (valread == 0) {
+                        // connection closed
+                        close(client_sockets[i]);
+                        client_sockets[i] = 0;
+                    }
+                    else {
+                        perror("recv");
+                    }
+                    close(client_sockets[i]);
+                }
+                else {
+                    // got some data from client
+                    
+                }
+            }
         }
         // ==================END OF client socket=======================
         // =============================================================
