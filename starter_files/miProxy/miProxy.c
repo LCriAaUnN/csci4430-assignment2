@@ -293,7 +293,7 @@ int main(int argc, char *argv[])
                     return -1;
                 }
 
-                if(connect(server_socket, (struct sockaddr *)&addr, sizeof(addr)) == -1) {
+                if(connect(server_socket, (struct sockaddr *)&address1, sizeof(address1)) == -1) {
                     perror("Error connecting server_socket");
                 }
 
