@@ -8,6 +8,7 @@
 #include <sys/time.h> //FD_SET, FD_ISSET, FD_ZERO, FD_SETSIZE macros
 #include <sys/types.h>
 #include <unistd.h> //close
+#include <netdb.h>
 
 #define MAXCLIENTS 30
 #define BUF_SIZE 2048
@@ -63,31 +64,39 @@ int get_listen_socket(struct sockaddr_in *address, int port)
     return server_socket;
 }
 
-int get_server_socket(struct sockaddr_in *address, char *hostname, int port) {
+int get_connect_server_socket(char *hostname, int port) {
+
+    int sockfd;
+    int yes = 1, rv;
+    struct addrinfo hints, *servinfo, *p;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
     
-    int yes = 1;
-    int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-    if (server_socket <= 0) {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
+    if ((rv = getaddrinfo(hostname, port, &hints, &servinfo)) != 0) {
+        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
     }
 
-    address->sin_family = AF_INET;
-    address->sin_port = htons(port);
-    
-    int success = setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-    if (success < 0) {
-        perror("setsockopt");
-        exit(EXIT_FAILURE);
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("web server: socket");
+            continue;
+        }
+        if(connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(sockfd);
+            perror("web server: connect");
+            continue;
+        }
+        break;
     }
 
-    if (inet_pton(AF_INET, hostname, &(address->sin_addr)) <= 0) {
-        perror("inet_pton");
-        close(server_socket);
-        exit(EXIT_FAILURE);
+    if(p == NULL) {
+        fprintf(stderr, "web server: failed to connect\n");
+        return -1;
     }
 
-    return server_socket;
+    return sockfd;
 }
 
 int main(int argc, char *argv[])
@@ -204,6 +213,7 @@ int main(int argc, char *argv[])
     struct sockaddr_in address;
     proxy_listen_socket = get_listen_socket(&address, listen_port);
     char buffer[BUF_SIZE];
+    int is_bitrate_list_kept = 0;
 
     // accept the incoming connection
     addrlen = sizeof(address);
@@ -257,8 +267,8 @@ int main(int argc, char *argv[])
             }
 
     
-            // Indicate the available positions of client sockets and server socket
-            int cli_socket_index = -1, ser_socket_index = -1; 
+            // Indicate the available position of client sockets (available position of server sockets is the same)
+            int cli_socket_index = -1;
 
 
             for (int i = 0; i < MAXCLIENTS; i++) {
@@ -268,37 +278,22 @@ int main(int argc, char *argv[])
                 }
             }
 
-            for (int i = 0; i < MAXCLIENTS; i++) {
-                if(server_sockets[i] == 0) {
-                    ser_socket_index = i;
-                    break;
-                }
-            }
 
-            if ((cli_socket_index == -1)||(ser_socket_index == -1)) {
-
-                if(cli_socket_index == -1) 
-                    perror("Clinet sockets are full");
-                if(ser_socket_index == -1)
-                    perror("Server sockets are full");
+            if ((cli_socket_index == -1)) {
+                perror("Exceeding the maximum number of clients");
+                close(browser_listen_socket);
             }
             else {
                 //Create a new connection to web server
-                struct sockaddr_in address1;
                 int server_socket;
-                server_socket = get_server_socket(&address1, server_file, 80);
+                server_socket = get_connect_server_socket(server_file, 80);
 
                 if (server_socket < 0) {
-                    fprintf(stderr, "unknown host\n");
                     return -1;
                 }
 
-                if(connect(server_socket, (struct sockaddr *)&address1, sizeof(address1)) == -1) {
-                    perror("Error connecting server_socket");
-                }
-
                 client_sockets[cli_socket_index] = browser_listen_socket;
-                server_sockets[ser_socket_index] = server_socket;
+                server_sockets[cli_socket_index] = server_socket;
             }
            
         }
@@ -317,7 +312,7 @@ int main(int argc, char *argv[])
             // TODO: write your code here
             if (FD_ISSET(client_sockets[i], &readfds)) {
 
-                if((valread = recv(client_sockets[i], buffer, sizeof buffer, 0)) <= 0) {
+                if((valread = recv(client_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
                     // got error or connection closed by client
                     if (valread == 0) {
                         // connection closed
@@ -327,11 +322,30 @@ int main(int argc, char *argv[])
                     else {
                         perror("recv");
                     }
-                    close(client_sockets[i]);
+                    continue;
                 }
                 else {
                     // got some data from client
-                    
+                    buffer[valread] = '\0';
+
+                    if(strstr(buffer, "big_buck_bunny.f4m")) {
+                        //the client requests for the video manifest
+
+                        if(!is_bitrate_list_kept) {
+                            // No bitrate list yet
+                            if(send(server_sockets[i], buffer, valread, 0) < 0) {
+                                perror("Error sending client's data to the web server");
+                            }
+
+                            char manifest_buffer[BUF_SIZE];
+                            int manifest_valread = 0;
+
+                            if((manifest_valread = recv(server_sockets[i], manifest_buffer, BUF_SIZE-1, 0)) <= 0) {
+                                perror("Error receive the manifest data from server");
+                            }
+    
+                        }
+                    }
                 }
             }
         }
