@@ -267,7 +267,7 @@ int main(int argc, char *argv[])
             }
 
     
-            // Indicate the available position of client sockets (available position of server sockets is the same)
+            // Indicate the available position of client sockets (available position of server sockets is the same)(Index of webserver addresss should be the same)
             int cli_socket_index = -1;
 
 
@@ -286,7 +286,7 @@ int main(int argc, char *argv[])
             else {
                 //Create a new connection to web server
                 int server_socket;
-                server_socket = get_connect_server_socket(server_file, 80);
+                server_socket = get_connect_server_socket(server_addrs[cli_socket_index], 80);
 
                 if (server_socket < 0) {
                     return -1;
@@ -318,6 +318,8 @@ int main(int argc, char *argv[])
                         // connection closed
                         close(client_sockets[i]);
                         client_sockets[i] = 0;
+                        close(server_sockets[i]);
+                        server_sockets[i] = 0;
                     }
                     else {
                         perror("recv");
@@ -340,8 +342,18 @@ int main(int argc, char *argv[])
                             char manifest_buffer[BUF_SIZE];
                             int manifest_valread = 0;
 
-                            if((manifest_valread = recv(server_sockets[i], manifest_buffer, BUF_SIZE-1, 0)) <= 0) {
+                            if((manifest_valread = recv(server_sockets[i], manifest_buffer, BUF_SIZE-1, 0)) < 0) {
                                 perror("Error receive the manifest data from server");
+                            }
+                            else if (manifest_valread == 0) {
+                                // connection is closed by the web server 
+                                close(client_sockets[i]);
+                                client_sockets[i] = 0;
+                                close(server_sockets[i]);
+                                server_sockets[i] = 0;
+                            }
+                            else {
+                                manifest_buffer[manifest_valread] = '\0';
                             }
     
                         }
