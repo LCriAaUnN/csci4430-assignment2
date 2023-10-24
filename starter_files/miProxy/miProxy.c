@@ -266,19 +266,24 @@ int main(int argc, char *argv[])
                 perror("accept");
             }
 
+             // inform user of socket number - used in send and receive commands
+            printf("\n---New host connection---\n");
+            printf("socket fd is %d , ip is : %s , port : %d \n", browser_listen_socket,
+                    inet_ntoa(address.sin_addr), ntohs(address.sin_port));
     
             // Indicate the available position of client sockets (available position of server sockets is the same)(Index of webserver addresss should be the same)
             int cli_socket_index = -1;
 
-
+            // add new socket to the array of sockets
             for (int i = 0; i < MAXCLIENTS; i++) {
                 if(client_sockets[i] == 0) {
+                    //find available position, and mark as cli_socket_index
                     cli_socket_index = i;
                     break;
                 }
             }
 
-
+            //if there's no available position
             if ((cli_socket_index == -1)) {
                 perror("Exceeding the maximum number of clients");
                 close(browser_listen_socket);
@@ -374,6 +379,64 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++)
         {
             // TODO: write your code here
+            if (FD_ISSET(server_sockets[i], &readfds)){
+                //handle server disconnection
+                if((valread = recv(server_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
+                    // got error or connection closed by server
+                    if (valread == 0) {
+                        // connection closed
+                        close(client_sockets[i]);
+                        client_sockets[i] = 0;
+                        close(server_sockets[i]);
+                        server_sockets[i] = 0;
+                    }
+                    else {
+                        perror("recv");
+                    }
+                    continue;
+                }
+                else {
+                    // got some data from server
+                    buffer[valread] = '\0';
+
+                    if(strstr(buffer, "big_buck_bunny")) {
+                        //the server replies with the video manifest
+                        if(send(client_sockets[i], buffer, valread, 0) < 0) {
+                            perror("Error sending server's data to the client");
+                        }
+                    }
+                    else {
+                        //the server replies with the video chunk
+                        if(!is_chunk[i]) {
+                            //the chunk is not transferred yet
+                            is_chunk[i] = 1;
+                            gettimeofday(&chunk_start_time[i], NULL);
+                        }
+
+                        //calculate the throughput
+                        struct timeval cur_time;
+                        gettimeofday(&cur_time, NULL);
+                        double time_diff = (cur_time.tv_sec - chunk_start_time[i].tv_sec) + (cur_time.tv_usec - chunk_start_time[i].tv_usec) / 1000000.0;
+                        double T_curN_new = chunk_sent_length[i] / time_diff;
+                        //Every time you make a new measurement (as outlined above), update your current throughput estimate as follows: T_cur = alpha * T_new + (1 - alpha) * T_cur
+                        T_curN[i] = alpha * T_curN_new + (1 - alpha) * T_curN[i];
+                        //calculate the bitrate
+                        //a connection can support a bitrate if the average throughput is at least 1.5 times the bitrate
+                        int bitrate = 0;
+                        for(int j = 0; j < bitrate_num[i]; j++) {
+                            if(T_curN[i] >= 1.5 * bitrates[i][j]) {
+                                bitrate = bitrates[i][j];
+                            }
+                        }
+                        
+                        //send the chunk to the client
+                        if(send(client_sockets[i], buffer, valread, 0) < 0) {
+                            perror("Error sending server's data to the client");
+                        }
+
+                        //write out the log
+                        
+            }
         }
         // =============END OF server socket======================
         // =======================================================
