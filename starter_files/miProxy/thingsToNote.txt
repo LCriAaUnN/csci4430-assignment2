@@ -9,3 +9,32 @@ if (alpha < 0 || alpha > 1) {
 然而，在某些特定的实现中，例如你正在实现一个代理服务器，你可能会选择将客户端套接字和服务器套接字的可用位置保持一致。这样做可以简化代码的逻辑，使得每个客户端套接字都对应一个服务器套接字，反之亦然。
 但是我们这个asig有一个server对应多个client情况，所以line 274的假设可能不成立？？
 需要另外考虑server socket位置？
+
+why valread BUF_SIZE-1 not bufsize？
+
+// receive and send back the remaining part
+int remaining_length = content_length + header_length - valread;
+while(remaining_length > 0){
+    memset(buffer, 0, MAX_MESSAGE_SIZE);
+    valread = recv(proxy_client_socket, buffer, MAX_MESSAGE_SIZE, 0);
+    remaining_length -= valread;
+    message_buffer += buffer;
+}//cout << message_buffer << endl;
+
+while(1){
+    size_t bitrate_info = message_buffer.find("bitrate=");
+    if(bitrate_info == message_buffer.npos)
+        break;
+    digit_start = bitrate_info + 9;
+    for(digit_end = digit_start; isdigit(message_buffer[digit_end]); digit_end++);
+    int bitrate = stoi(message_buffer.substr(digit_start, digit_end-digit_start));
+    message_buffer[digit_start - 5] = 'l';
+    
+    for(int j=0;j<MAX_BITRATE_LEVEL;j++){
+        if(bitrate_level[j] == 0){
+            bitrate_level[j] = bitrate;
+            printf("new bitrate: %d\n", bitrate);
+            break;
+        }
+    }
+}

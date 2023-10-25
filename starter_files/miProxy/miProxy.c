@@ -264,10 +264,12 @@ int main(int argc, char *argv[])
             int browser_listen_socket = accept(proxy_listen_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
             if (browser_listen_socket == -1) {
                 perror("accept");
+                //may delete next line
+                exit(EXIT_FAILURE);
             }
 
              // inform user of socket number - used in send and receive commands
-            printf("\n---New host connection---\n");
+            printf("\n---New connection---\n");
             printf("socket fd is %d , ip is : %s , port : %d \n", browser_listen_socket,
                     inet_ntoa(address.sin_addr), ntohs(address.sin_port));
     
@@ -379,8 +381,12 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++)
         {
             // TODO: write your code here
-            if (FD_ISSET(server_sockets[i], &readfds)){
+            //for f4m file, Keep the received original f4m response (for parsing bitrates) and not forward it to browser. Forward the received “_nolist.f4m” response to the browser
+            //for video chunk, Forward the received response to browser
+            //for other request, forward received response to browser
+            if (FD_ISSET(server_sockets[i], &readfds)&&server_sockets[i]!=0){
                 //handle server disconnection
+                int length = 0;
                 if((valread = recv(server_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
                     // got error or connection closed by server
                     if (valread == 0) {
@@ -435,6 +441,7 @@ int main(int argc, char *argv[])
                         }
 
                         //write out the log
+                }
                         
             }
         }
