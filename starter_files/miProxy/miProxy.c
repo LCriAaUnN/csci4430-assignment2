@@ -381,12 +381,8 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++)
         {
             // TODO: write your code here
-            //for f4m file, Keep the received original f4m response (for parsing bitrates) and not forward it to browser. Forward the received “_nolist.f4m” response to the browser
-            //for video chunk, Forward the received response to browser
-            //for other request, forward received response to browser
             if (FD_ISSET(server_sockets[i], &readfds)&&server_sockets[i]!=0){
                 //handle server disconnection
-                int length = 0;
                 if((valread = recv(server_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
                     // got error or connection closed by server
                     if (valread == 0) {
@@ -405,42 +401,96 @@ int main(int argc, char *argv[])
                     // got some data from server
                     buffer[valread] = '\0';
 
-                    if(strstr(buffer, "big_buck_bunny")) {
-                        //the server replies with the video manifest
-                        if(send(client_sockets[i], buffer, valread, 0) < 0) {
-                            perror("Error sending server's data to the client");
+                    //send to client
+                    if(send(client_sockets[i], buffer, valread, 0) < 0) {
+                        perror("Error sending server's data to the client");
+                    }
+
+                    char *complete_buffer = buffer;
+
+
+                    if(!is_chunk[i]) {
+                        //the chunk is not transferred yet
+                        is_chunk[i] = 1;
+                        //start timing
+                        gettimeofday(&chunk_start_time[i], NULL);
+                    }
+
+                    int headerLength;
+                    int contentLength;
+                    //the end of an HTTP header
+                    if(strstr(buffer,"\r\n\r\n")!=NULL){
+                        char * endOfHeader=strstr(buffer,"\r\n\r\n");
+                        //“\r\n\r\n” (i.e., strlen(”\r\n\r\n"))=>4 adds the end position of the header, and finally subtracts buffer (the start position of the header). This gives the total length of the header.
+                        headerLength=4+endOfHeader-buffer;
+                    }
+                    else{
+                        perror("Error: HTTP header is not found");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    //the size of the HTTP body in bytes
+                    if(strstr(buffer, "Content-Length: ")!=NULL) {
+                        //len (Content-Length: )=16
+                        char * contentStart=strstr(buffer, "Content-Length: ")+16;
+                        char * contentEnd=strstr(contentStart, "\r\n");
+                        //extra 1 byte for the null terminator
+                        char digit[contentEnd-contentStart+1];
+                        contentLength=stoi(strncpy(digit, contentStart, contentEnd-contentStart));
+                    }
+                    else
+                    {
+                        perror("Error: Content-Length is not found");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    int remainingLength=contentLength+headerLength-valread;
+                    //receive remaining data
+                    while(remainingLength>0){
+                        memset(buffer, 0, BUF_SIZE);
+                        int recvLength=recv(server_sockets[i], buffer, MIN(remainingLength, BUF_SIZE-1), 0);
+                        if(recvLength<0){
+                            perror("Error: receive remaining data");
+                            exit(EXIT_FAILURE);
+                        }
+                        else if(recvLength==0){
+                            perror("Error: connection closed by server");
+                            exit(EXIT_FAILURE);
+                        }
+                        else{
+                            send(client_sockets[i], buffer, recvLength, 0);
+                            remainingLength-=recvLength;
+                            complete_buffer=strcat(complete_buffer, buffer);
                         }
                     }
-                    else {
-                        //the server replies with the video chunk
-                        if(!is_chunk[i]) {
-                            //the chunk is not transferred yet
-                            is_chunk[i] = 1;
-                            gettimeofday(&chunk_start_time[i], NULL);
-                        }
+                    //end timing
+                    struct timeval end_time;
+                    gettimeofday(&end_time, NULL);
 
-                        //calculate the throughput
-                        struct timeval cur_time;
-                        gettimeofday(&cur_time, NULL);
-                        double time_diff = (cur_time.tv_sec - chunk_start_time[i].tv_sec) + (cur_time.tv_usec - chunk_start_time[i].tv_usec) / 1000000.0;
-                        double T_curN_new = chunk_sent_length[i] / time_diff;
-                        //Every time you make a new measurement (as outlined above), update your current throughput estimate as follows: T_cur = alpha * T_new + (1 - alpha) * T_cur
+                    //check if the chunk type is video
+                    //according to tut06pp10, Content-Type: video/f4f
+                    //Analyze the reply and calculate the bitrate
+                    if(strstr(complete_buffer, "Content-Type: video/f4f")!=NULL) {
+                        double timeDiff=(end_time.tv_sec-chunk_start_time[i].tv_sec)+(end_time.tv_usec-chunk_start_time[i].tv_usec)/1000000.0;
+                        double T_curN_new = (contentLength+headerLength) / time_diff;
                         T_curN[i] = alpha * T_curN_new + (1 - alpha) * T_curN[i];
-                        //calculate the bitrate
-                        //a connection can support a bitrate if the average throughput is at least 1.5 times the bitrate
                         int bitrate = 0;
-                        for(int j = 0; j < bitrate_num[i]; j++) {
+                        for(int j = 0; j < MAX_BITRATE_NUM; j++) {
                             if(T_curN[i] >= 1.5 * bitrates[i][j]) {
                                 bitrate = bitrates[i][j];
                             }
                         }
-                        
-                        //send the chunk to the client
-                        if(send(client_sockets[i], buffer, valread, 0) < 0) {
-                            perror("Error sending server's data to the client");
-                        }
-
                         //write out the log
+                        //ip,chunk name, server file, timediff, t_curn_new, t_curn[i], bitrate
+                        //if open log fail
+                        FILE *fp_log = fopen(log_file, "a");
+                        if (fp_log == NULL) {
+                            perror("open log file");
+                            exit(1);
+                        }
+                        fprintf(fp_log, "%s %s %s %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], server_file, timeDiff, T_curN_new, T_curN[i], bitrate);
+                        fclose(fp_log);
+                    }
                 }
                         
             }

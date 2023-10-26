@@ -12,29 +12,5 @@ if (alpha < 0 || alpha > 1) {
 
 why valread BUF_SIZE-1 not bufsize？
 
-// receive and send back the remaining part
-int remaining_length = content_length + header_length - valread;
-while(remaining_length > 0){
-    memset(buffer, 0, MAX_MESSAGE_SIZE);
-    valread = recv(proxy_client_socket, buffer, MAX_MESSAGE_SIZE, 0);
-    remaining_length -= valread;
-    message_buffer += buffer;
-}//cout << message_buffer << endl;
+double T_curN_new = (contentLength+headerLength) * 8(?) / time_diff;
 
-while(1){
-    size_t bitrate_info = message_buffer.find("bitrate=");
-    if(bitrate_info == message_buffer.npos)
-        break;
-    digit_start = bitrate_info + 9;
-    for(digit_end = digit_start; isdigit(message_buffer[digit_end]); digit_end++);
-    int bitrate = stoi(message_buffer.substr(digit_start, digit_end-digit_start));
-    message_buffer[digit_start - 5] = 'l';
-    
-    for(int j=0;j<MAX_BITRATE_LEVEL;j++){
-        if(bitrate_level[j] == 0){
-            bitrate_level[j] = bitrate;
-            printf("new bitrate: %d\n", bitrate);
-            break;
-        }
-    }
-}
