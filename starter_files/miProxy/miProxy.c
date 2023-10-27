@@ -341,6 +341,7 @@ int main(int argc, char *argv[])
 
                             char manifest_buffer[BUF_SIZE];
                             int manifest_valread = 0;
+                            int total_manifest_valread = 0;
 
                             if((manifest_valread = recv(server_sockets[i], manifest_buffer, BUF_SIZE-1, 0)) < 0) {
                                 perror("Error receive the manifest data from server");
@@ -353,7 +354,13 @@ int main(int argc, char *argv[])
                                 server_sockets[i] = 0;
                             }
                             else {
-                                manifest_buffer[manifest_valread] = '\0';
+                                total_manifest_valread += manifest_valread;          
+
+                                while ((manifest_valread = recv(server_sockets[i], manifest_buffer+total_manifest_valread, BUF_SIZE - total_manifest_valread - 1, 0)) > 0) {
+                                    total_manifest_valread += manifest_valread;
+                                }
+                                manifest_buffer[total_manifest_valread] = '\0';
+                                
                             }
     
                         }
