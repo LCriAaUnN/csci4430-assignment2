@@ -264,21 +264,28 @@ int main(int argc, char *argv[])
             int browser_listen_socket = accept(proxy_listen_socket, (struct sockaddr *)&address, (socklen_t *)&addrlen);
             if (browser_listen_socket == -1) {
                 perror("accept");
+                //may delete next line
+                exit(EXIT_FAILURE);
             }
 
+             // inform user of socket number - used in send and receive commands
+            printf("\n---New connection---\n");
+            printf("socket fd is %d , ip is : %s , port : %d \n", browser_listen_socket,
+                    inet_ntoa(address.sin_addr), ntohs(address.sin_port));
     
             // Indicate the available position of client sockets (available position of server sockets is the same)(Index of webserver addresss should be the same)
             int cli_socket_index = -1;
 
-
+            // add new socket to the array of sockets
             for (int i = 0; i < MAXCLIENTS; i++) {
                 if(client_sockets[i] == 0) {
+                    //find available position, and mark as cli_socket_index
                     cli_socket_index = i;
                     break;
                 }
             }
 
-
+            //if there's no available position
             if ((cli_socket_index == -1)) {
                 perror("Exceeding the maximum number of clients");
                 close(browser_listen_socket);
@@ -381,6 +388,119 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++)
         {
             // TODO: write your code here
+            if (FD_ISSET(server_sockets[i], &readfds)&&server_sockets[i]!=0){
+                //handle server disconnection
+                if((valread = recv(server_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
+                    // got error or connection closed by server
+                    if (valread == 0) {
+                        // connection closed
+                        close(client_sockets[i]);
+                        client_sockets[i] = 0;
+                        close(server_sockets[i]);
+                        server_sockets[i] = 0;
+                    }
+                    else {
+                        perror("recv");
+                    }
+                    continue;
+                }
+                else {
+                    // got some data from server
+                    buffer[valread] = '\0';
+
+                    //send to client
+                    if(send(client_sockets[i], buffer, valread, 0) < 0) {
+                        perror("Error sending server's data to the client");
+                    }
+
+                    char *complete_buffer = buffer;
+
+
+                    if(!is_chunk[i]) {
+                        //the chunk is not transferred yet
+                        is_chunk[i] = 1;
+                        //start timing
+                        gettimeofday(&chunk_start_time[i], NULL);
+                    }
+
+                    int headerLength;
+                    int contentLength;
+                    //the end of an HTTP header
+                    if(strstr(buffer,"\r\n\r\n")!=NULL){
+                        char * endOfHeader=strstr(buffer,"\r\n\r\n");
+                        //“\r\n\r\n” (i.e., strlen(”\r\n\r\n"))=>4 adds the end position of the header, and finally subtracts buffer (the start position of the header). This gives the total length of the header.
+                        headerLength=4+endOfHeader-buffer;
+                    }
+                    else{
+                        perror("Error: HTTP header is not found");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    //the size of the HTTP body in bytes
+                    if(strstr(buffer, "Content-Length: ")!=NULL) {
+                        //len (Content-Length: )=16
+                        char * contentStart=strstr(buffer, "Content-Length: ")+16;
+                        char * contentEnd=strstr(contentStart, "\r\n");
+                        //extra 1 byte for the null terminator
+                        char digit[contentEnd-contentStart+1];
+                        contentLength=stoi(strncpy(digit, contentStart, contentEnd-contentStart));
+                    }
+                    else
+                    {
+                        perror("Error: Content-Length is not found");
+                        exit(EXIT_FAILURE);
+                    }
+
+                    int remainingLength=contentLength+headerLength-valread;
+                    //receive remaining data
+                    while(remainingLength>0){
+                        memset(buffer, 0, BUF_SIZE);
+                        int recvLength=recv(server_sockets[i], buffer, MIN(remainingLength, BUF_SIZE-1), 0);
+                        if(recvLength<0){
+                            perror("Error: receive remaining data");
+                            exit(EXIT_FAILURE);
+                        }
+                        else if(recvLength==0){
+                            perror("Error: connection closed by server");
+                            exit(EXIT_FAILURE);
+                        }
+                        else{
+                            send(client_sockets[i], buffer, recvLength, 0);
+                            remainingLength-=recvLength;
+                            complete_buffer=strcat(complete_buffer, buffer);
+                        }
+                    }
+                    //end timing
+                    struct timeval end_time;
+                    gettimeofday(&end_time, NULL);
+
+                    //check if the chunk type is video
+                    //according to tut06pp10, Content-Type: video/f4f
+                    //Analyze the reply and calculate the bitrate
+                    if(strstr(complete_buffer, "Content-Type: video/f4f")!=NULL) {
+                        double timeDiff=(end_time.tv_sec-chunk_start_time[i].tv_sec)+(end_time.tv_usec-chunk_start_time[i].tv_usec)/1000000.0;
+                        double T_curN_new = (contentLength+headerLength) / time_diff;
+                        T_curN[i] = alpha * T_curN_new + (1 - alpha) * T_curN[i];
+                        int bitrate = 0;
+                        for(int j = 0; j < MAX_BITRATE_NUM; j++) {
+                            if(T_curN[i] >= 1.5 * bitrates[i][j]) {
+                                bitrate = bitrates[i][j];
+                            }
+                        }
+                        //write out the log
+                        //ip,chunk name, server file, timediff, t_curn_new, t_curn[i], bitrate
+                        //if open log fail
+                        FILE *fp_log = fopen(log_file, "a");
+                        if (fp_log == NULL) {
+                            perror("open log file");
+                            exit(1);
+                        }
+                        fprintf(fp_log, "%s %s %s %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], server_file, timeDiff, T_curN_new, T_curN[i], bitrate);
+                        fclose(fp_log);
+                    }
+                }
+                        
+            }
         }
         // =============END OF server socket======================
         // =======================================================
