@@ -99,6 +99,43 @@ int get_connect_server_socket(char *hostname, int port) {
     return sockfd;
 }
 
+void extract_bitrate_list(char* manifest_buffer, int** bitrates, int* bitrate_num, int i) {
+    const char* key = "bitrate=";
+    char* ret = manifest_buffer;
+    while(1) {
+        char rate[20];
+        if((ret = strstr(ret, key)) == NULL) break;
+        else {
+            ret += 9;
+            int count = 0;
+            while(ret[count] != '"') {
+                rate[count] = ret[count];
+                count++; 
+            }
+            rate[count] = '\0';
+            bitrates[i][bitrate_num[i]] = atoi(rate);
+            bitrate_num[i]++;
+        }
+    }
+}
+
+void modify_to_nolist(char* buffer, char* nolist_buffer) {
+    char* start_ptr = strstr(buffer, "big_buck_bunny");
+    char* end_ptr = strstr(buffer, ".f4m");
+
+    size_t prefix_len = start_ptr - buffer;
+    size_t suffix_len = strlen(end_ptr + 4);
+
+    strncpy(nolist_buffer, buffer, prefix_len);
+    nolist_buffer[prefix_len] = '\0';
+
+
+    strcat(nolist_buffer, "big_buck_bunny_nolist.f4m");
+
+
+    strcat(nolist_buffer, end_ptr + 4);
+}
+
 int main(int argc, char *argv[])
 {
     int use_dns = 0;
@@ -213,7 +250,6 @@ int main(int argc, char *argv[])
     struct sockaddr_in address;
     proxy_listen_socket = get_listen_socket(&address, listen_port);
     char buffer[BUF_SIZE];
-    int is_bitrate_list_kept = 0;
 
     // accept the incoming connection
     addrlen = sizeof(address);
@@ -340,12 +376,14 @@ int main(int argc, char *argv[])
                     if(strstr(buffer, "big_buck_bunny.f4m")) {
                         //the client requests for the video manifest
 
-                        if(!is_bitrate_list_kept) {
+                        if(bitrate_num[i] == 0) {
                             // No bitrate list yet
                             if(send(server_sockets[i], buffer, valread, 0) < 0) {
+                                // sent the original .f4m request to the server
                                 perror("Error sending client's data to the web server");
                             }
 
+                            // Receive the original .f4m file with bitrate list, keep it and don't send back to the clients
                             char manifest_buffer[BUF_SIZE];
                             int manifest_valread = 0;
                             int total_manifest_valread = 0;
@@ -361,16 +399,67 @@ int main(int argc, char *argv[])
                                 server_sockets[i] = 0;
                             }
                             else {
-                                total_manifest_valread += manifest_valread;          
+                                // got the original .f4m response from the server
+                                total_manifest_valread += manifest_valread;
+                                manifest_buffer[manifest_valread] = '\0';
 
-                                while ((manifest_valread = recv(server_sockets[i], manifest_buffer+total_manifest_valread, BUF_SIZE - total_manifest_valread - 1, 0)) > 0) {
-                                    total_manifest_valread += manifest_valread;
+                                int headerLength;
+                                int contentLength;
+
+                                if(strstr(manifest_buffer, "\r\n\r\n")!= NULL) {
+                                    char * endOfHeader = strstr(manifest_buffer, "\r\n\r\n");
+                                    headerLength = 4 + endOfHeader - manifest_buffer;
                                 }
-                                manifest_buffer[total_manifest_valread] = '\0';
+                                else{
+                                    perror("Error: HTTP header is not found");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                //the size of the HTTP body in bytes
+                                if(strstr(manifest_buffer, "Content-Length: ") != NULL) {
+                                    char * contentStart=strstr(manifest_buffer, "Content-Length: ")+16;
+                                    char * contentEnd=strstr(contentStart, "\r\n"); 
+                                    char digit[contentEnd-contentStart+1];
+                                    contentLength=stoi(strncpy(digit, contentStart, contentEnd-contentStart));
+                                }
+                                else {
+                                    perror("Error: Content-Length is not found");
+                                    exit(EXIT_FAILURE);
+                                }
+
+                                int http_packet_len = headerLength + contentLength;
+
+                                while(total_manifest_valread < http_packet_len) {
+                                    //!!!!!!!!!!!!!!!!这里buffer很可能超掉，size要再改改！！
+                                    if((manifest_valread = recv(server_sockets[i], manifest_buffer, BUF_SIZE-1, 0)) < 0){
+                                        perror("Error receiving web server's data");
+                                    }
+                                    else if (manifest_valread == 0) {
+                                        // connection is closed by the web server 
+                                        close(client_sockets[i]);
+                                        client_sockets[i] = 0;
+                                        close(server_sockets[i]);
+                                        server_sockets[i] = 0;
+                                        break;
+                                    }
+                                    else {
+                                        total_manifest_valread += manifest_valread;
+                                    }
+                                }
+
+                                if (manifest_valread == 0) continue;
                                 
+                                extract_bitrate_list(manifest_buffer, bitrates, bitrate_num, i);
                             }
     
                         }
+
+                        // There is bitrate list
+                        // Modify the original .f4m request to _nolist.f4m
+                        char nolist_buffer[BUF_SIZE]; // store the _nolist.f4m http request
+
+                        modify_to_nolist(buffer, nolist_buffer);
+
                     }
                 }
             }
