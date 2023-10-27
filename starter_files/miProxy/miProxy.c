@@ -479,7 +479,7 @@ int main(int argc, char *argv[])
                     //Analyze the reply and calculate the bitrate
                     if(strstr(complete_buffer, "Content-Type: video/f4f")!=NULL) {
                         double timeDiff=(end_time.tv_sec-chunk_start_time[i].tv_sec)+(end_time.tv_usec-chunk_start_time[i].tv_usec)/1000000.0;
-                        double T_curN_new = (contentLength+headerLength) / time_diff;
+                        double T_curN_new = (contentLength+headerLength) / timeDiff;
                         T_curN[i] = alpha * T_curN_new + (1 - alpha) * T_curN[i];
                         int bitrate = 0;
                         for(int j = 0; j < MAX_BITRATE_NUM; j++) {
