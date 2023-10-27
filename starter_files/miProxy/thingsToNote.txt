@@ -13,4 +13,3 @@ if (alpha < 0 || alpha > 1) {
 why valread BUF_SIZE-1 not bufsize？
 
 double T_curN_new = (contentLength+headerLength) * 8(?) / time_diff;
-

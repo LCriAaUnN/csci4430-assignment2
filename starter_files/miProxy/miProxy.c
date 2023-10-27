@@ -216,6 +216,13 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
+
+
+    if(alpha<0 || alpha>1) {
+        perror("alpha is out of range");
+        exit(-1);
+    }
+
     int proxy_listen_socket, addrlen, activity, valread;
     // define the para for each server-client pair
     int client_sockets[MAXCLIENTS] = {0}; // client socket for each streaming
@@ -459,7 +466,11 @@ int main(int argc, char *argv[])
                         char nolist_buffer[BUF_SIZE]; // store the _nolist.f4m http request
 
                         modify_to_nolist(buffer, nolist_buffer);
-
+                        valread = strlen(nolist_buffer);
+                        if(send(server_sockets[i], nolist_buffer, valread, 0) < 0) {
+                            // sent the  _nolist.f4m request to the server
+                            perror("Error sending client's data to the web server");
+                        }
                     }
                 }
             }
