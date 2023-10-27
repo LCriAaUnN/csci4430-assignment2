@@ -14,3 +14,44 @@ why valread BUF_SIZE-1 not bufsize？
 
 double T_curN_new = (contentLength+headerLength) * 8(?) / time_diff;
 
+else if(strstr(buffer,"Seg")){
+                        //select bitrate
+                        int select_bitrate = 0;
+                        for(int j = 0; j < MAX_BITRATE_NUM; j++) {
+                            if(T_curN[i] >= 1.5 * bitrates[i][j]) {
+                                select_bitrate = bitrates[i][j];
+                            }
+                        }
+                        //modify the original chunk request to the selected bitrate
+                        //in form of path/to/video/<bitrate>Seg<num>-Frag<num>
+                        char *start_ptr = strstr(buffer, "Seg");
+                        char *buffer_end=strstr(buffer,"Seg");
+                        //find the end of the buffer
+                        while(buffer[buffer_end-buffer]!=' '){
+                            buffer_end++;
+                        }
+                        buffer_end--;
+                        //find the laset '/'
+                        char *end_ptr = strrchr(start_ptr, '/');
+                        //bit rate is between the last '/' and 'Seg', modify the original bitrate to selected one
+                        char new_buffer_first[BUF_SIZE];
+                        char new_buffer_second[BUF_SIZE];
+                        strncpy(new_buffer_first, buffer, end_ptr-buffer+1);
+                        //copy the string after seg
+                        strncpy(new_buffer_second, start_ptr, buffer_end-start_ptr);
+                        //change select_bitrate to string
+                        char bitrate_str[10];
+                        sprintf(bitrate_str, "%d", select_bitrate);
+                        strcat(new_buffer_first, bitrate_str);
+                        strcat(new_buffer_first, new_buffer_second);
+                        //copy the new buffer to buffer
+                        strncpy(buffer, new_buffer_first, strlen(new_buffer_first));
+                        //chunkname
+                        char * chunk_name = (char *) malloc(sizeof(char) * 100);
+                        strncpy(chunk_name, start_ptr, buffer_end-start_ptr);
+                        chunknames[i] = chunk_name;
+                    }
+                    valread=strlen(buffer);
+                    if(send(server_sockets[i], buffer, valread, 0) < 0) {
+                        perror("Error sending client's data to the web server");
+                    }
