@@ -64,42 +64,7 @@ int get_listen_socket(struct sockaddr_in *address, int port)
     return server_socket;
 }
 
-int get_connect_server_socket(char *hostname, int port) {
-
-    int sockfd;
-    int yes = 1, rv;
-    struct addrinfo hints, *servinfo, *p;
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    
-    if ((rv = getaddrinfo(hostname, port, &hints, &servinfo)) != 0) {
-        fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
-    }
-
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        if((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-            perror("web server: socket");
-            continue;
-        }
-        if(connect(sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(sockfd);
-            perror("web server: connect");
-            continue;
-        }
-        break;
-    }
-
-    if(p == NULL) {
-        fprintf(stderr, "web server: failed to connect\n");
-        return -1;
-    }
-
-    return sockfd;
-}
-
-void extract_bitrate_list(char* manifest_buffer, int** bitrates, int* bitrate_num, int i) {
+void extract_bitrate_list(char* manifest_buffer, int bitrates[][MAX_BITRATE_NUM], int* bitrate_num, int i) {
     const char* key = "bitrate=";
     char* ret = manifest_buffer;
     while(1) {
@@ -329,18 +294,29 @@ int main(int argc, char *argv[])
             }
 
             //if there's no available position
-            if ((cli_socket_index == -1)) {
+            if (cli_socket_index == -1) {
                 perror("Exceeding the maximum number of clients");
                 close(browser_listen_socket);
             }
             else {
                 //Create a new connection to web server
-                int server_socket;
-                server_socket = get_connect_server_socket(server_addrs[cli_socket_index], 80);
-
-                if (server_socket < 0) {
-                    return -1;
+                int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+                if (server_socket == -1) {
+                    perror("Socket creation failed");
+                    exit(1);
                 }
+                int server_addr_index = cli_socket_index % server_num; //Round-Robin Load Balancer
+
+                struct sockaddr_in server_address;
+                memset(&server_address, 0, sizeof(server_address));
+                server_address.sin_family = AF_INET;
+                server_address.sin_port = htons(80);
+                server_address.sin_addr.s_addr = server_addrs[server_addr_index];
+                if (connect(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
+                    perror("Connection failed");
+                    close(server_socket);
+                    exit(1);
+                }      
 
                 client_sockets[cli_socket_index] = browser_listen_socket;
                 server_sockets[cli_socket_index] = server_socket;
@@ -427,7 +403,7 @@ int main(int argc, char *argv[])
                                     char * contentStart=strstr(manifest_buffer, "Content-Length: ")+16;
                                     char * contentEnd=strstr(contentStart, "\r\n"); 
                                     char digit[contentEnd-contentStart+1];
-                                    contentLength=stoi(strncpy(digit, contentStart, contentEnd-contentStart));
+                                    contentLength=atoi(strncpy(digit, contentStart, contentEnd-contentStart));
                                 }
                                 else {
                                     perror("Error: Content-Length is not found");
@@ -587,7 +563,7 @@ int main(int argc, char *argv[])
                         char * contentEnd=strstr(contentStart, "\r\n");
                         //extra 1 byte for the null terminator
                         char digit[contentEnd-contentStart+1];
-                        contentLength=stoi(strncpy(digit, contentStart, contentEnd-contentStart));
+                        contentLength=atoi(strncpy(digit, contentStart, contentEnd-contentStart));
                     }
                     else
                     {
@@ -639,7 +615,7 @@ int main(int argc, char *argv[])
                             perror("open log file");
                             exit(1);
                         }
-                        fprintf(fp_log, "%s %s %s %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], server_file, timeDiff, T_curN_new, T_curN[i], bitrate);
+                        fprintf(fp_log, "%s %s %s %f %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], server_file, timeDiff, T_curN_new, T_curN[i], bitrate);
                         fclose(fp_log);
                     }
                 }
