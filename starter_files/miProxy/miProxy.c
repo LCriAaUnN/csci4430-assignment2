@@ -333,8 +333,7 @@ int main(int argc, char *argv[])
         // 2. Handle f4m data GET request
         // 3. Handle chunk data GET request
         // 4. Handle other request
-        for (int i = 0; i < MAXCLIENTS; i++)
-        {
+        for (int i = 0; i < MAXCLIENTS; i++) {
             // TODO: write your code here
             if (FD_ISSET(client_sockets[i], &readfds)) {
 
@@ -491,6 +490,12 @@ int main(int argc, char *argv[])
                             perror("Error sending client's data to the web server");
                         }
                     }
+                    else {
+                        //Handle other requests from clients
+                        if(send(server_sockets[i], buffer, valread, 0) < 0) {
+                            perror("Error sending client's data to the web server");
+                        }
+                    }
                     
                 }
             }
@@ -533,8 +538,6 @@ int main(int argc, char *argv[])
                         perror("Error sending server's data to the client");
                     }
 
-                    char *complete_buffer = buffer;
-
 
                     if(!is_chunk[i]) {
                         //the chunk is not transferred yet
@@ -571,7 +574,11 @@ int main(int argc, char *argv[])
                         exit(EXIT_FAILURE);
                     }
 
+                    
+
                     int remainingLength=contentLength+headerLength-valread;
+                    char complete_buffer[valread+remainingLength+1];
+                    strcpy(complete_buffer, buffer);
                     //receive remaining data
                     while(remainingLength>0){
                         memset(buffer, 0, BUF_SIZE);
@@ -587,9 +594,10 @@ int main(int argc, char *argv[])
                         else{
                             send(client_sockets[i], buffer, recvLength, 0);
                             remainingLength-=recvLength;
-                            complete_buffer=strcat(complete_buffer, buffer);
+                            strcat(complete_buffer, buffer);
                         }
                     }
+                    
                     //end timing
                     struct timeval end_time;
                     gettimeofday(&end_time, NULL);
