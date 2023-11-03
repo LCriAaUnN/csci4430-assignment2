@@ -65,6 +65,7 @@ int get_listen_socket(struct sockaddr_in *address, int port)
 }
 
 void extract_bitrate_list(char* manifest_buffer, int bitrates[][MAX_BITRATE_NUM], int* bitrate_num, int i) {
+    printf("extract\n");
     const char* key = "bitrate=";
     char* ret = manifest_buffer;
     while(1) {
@@ -359,6 +360,8 @@ int main(int argc, char *argv[])
                     return -1;
                 }
 
+                inet_pton(AF_INET, ip_addresses[server_addr_index], &server_ips[cli_socket_index].s_addr);
+
                 freeaddrinfo(servinfo);
 
                 client_sockets[cli_socket_index] = browser_listen_socket;
@@ -379,7 +382,7 @@ int main(int argc, char *argv[])
         for (int i = 0; i < MAXCLIENTS; i++) {
             // TODO: write your code here
             if (FD_ISSET(client_sockets[i], &readfds)) {
-
+		printf("client start\n");
                 if((valread = recv(client_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
                     // got error or connection closed by client
                     if (valread == 0) {
@@ -400,7 +403,7 @@ int main(int argc, char *argv[])
 
                     if(strstr(buffer, "big_buck_bunny.f4m")) {
                         //the client requests for the video manifest
-
+			printf("client: video\n");
                         if(bitrate_num[i] == 0) {
                             // No bitrate list yet
                             if(send(server_sockets[i], buffer, valread, 0) < 0) {
@@ -492,6 +495,7 @@ int main(int argc, char *argv[])
                     }
                     else if(strstr(buffer,"Seg")){
                         //select bitrate
+			printf("client: seg\n");
                         int select_bitrate = 0;
                         for(int j = 0; j < MAX_BITRATE_NUM; j++) {
                             if(T_curN[i] >= 1.5 * bitrates[i][j]) {
@@ -535,6 +539,7 @@ int main(int argc, char *argv[])
                     }
                     else {
                         //Handle other requests from clients
+			printf("client: other requests\n");
                         if(send(server_sockets[i], buffer, valread, 0) < 0) {
                             perror("Error sending client's data to the web server");
                         }
@@ -557,6 +562,7 @@ int main(int argc, char *argv[])
         {
             // TODO: write your code here
             if (FD_ISSET(server_sockets[i], &readfds)&&server_sockets[i]!=0){
+		printf("server start\n");
                 //handle server disconnection
                 if((valread = recv(server_sockets[i], buffer, BUF_SIZE - 1, 0)) <= 0) {
                     // got error or connection closed by server
@@ -622,6 +628,7 @@ int main(int argc, char *argv[])
                     int remainingLength=contentLength+headerLength-valread;
                     char complete_buffer[valread+remainingLength+1];
                     strcpy(complete_buffer, buffer);
+		    printf("reamining length: %d\n",remainingLength);
                     //receive remaining data
                     while(remainingLength>0){
                         memset(buffer, 0, BUF_SIZE);
@@ -640,6 +647,7 @@ int main(int argc, char *argv[])
                             strcat(complete_buffer, buffer);
                         }
                     }
+		    printf("out of loop\n");
                     
                     //end timing
                     struct timeval end_time;
@@ -648,7 +656,9 @@ int main(int argc, char *argv[])
                     //check if the chunk type is video
                     //according to tut06pp10, Content-Type: video/f4f
                     //Analyze the reply and calculate the bitrate
+		    //printf("type:\n%s\n",strstr(complete_buffer, "Content-Type:"));
                     if(strstr(complete_buffer, "Content-Type: video/f4f")!=NULL) {
+		   	printf("chunk found\n");
                         double timeDiff=(end_time.tv_sec-chunk_start_time[i].tv_sec)+(end_time.tv_usec-chunk_start_time[i].tv_usec)/1000000.0;
                         double T_curN_new = (contentLength+headerLength) / timeDiff;
                         T_curN[i] = alpha * T_curN_new + (1 - alpha) * T_curN[i];
@@ -658,6 +668,8 @@ int main(int argc, char *argv[])
                                 bitrate = bitrates[i][j];
                             }
                         }
+			printf("tcurn[i]: %f\n",T_curN[i]);
+			printf("bitrate[i]: %d\n",bitrate);
                         //write out the log
                         //ip,chunk name, server file, timediff, t_curn_new, t_curn[i], bitrate
                         //if open log fail
@@ -666,9 +678,14 @@ int main(int argc, char *argv[])
                             perror("open log file");
                             exit(1);
                         }
-                        fprintf(fp_log, "%s %s %s %f %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], server_file, timeDiff, T_curN_new, T_curN[i], bitrate);
+                        
+                        int server_addr_index = i % server_num;
+                        fprintf(fp_log, "%s %s %s %f %f %f %d\n", inet_ntoa(server_ips[i]), chunknames[i], ip_addresses[server_addr_index], timeDiff, T_curN_new, T_curN[i], bitrate);
                         fclose(fp_log);
                     }
+		    else{
+			printf("no chunk detected\n");
+			}
                 }
                         
             }
