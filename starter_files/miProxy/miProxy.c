@@ -228,6 +228,30 @@ int main(int argc, char *argv[])
     puts("Waiting for connections ...");
     // set of socket descriptors
     fd_set readfds;
+
+    FILE *file = fopen(server_file, "r"); 
+    if (file == NULL) {
+        perror("fopen");
+        exit(1);
+    }
+
+    char ip_addresses[MAX_SERVER_LINE][100]; 
+    for (int i = 0; i < server_num; i++) {
+        if (fgets(ip_addresses[i], 100, file) == NULL) {
+            perror("fgets");
+            fclose(file);
+            exit(1);
+        }
+        // 去除末尾换行符
+        size_t ip_len = strlen(ip_addresses[i]);
+        if (ip_addresses[i][ip_len - 1] == '\n') {
+            ip_addresses[i][ip_len - 1] = '\0';
+        }
+    }
+
+    fclose(file);
+
+
     while (1)
     {
         // clear the socket set
@@ -300,23 +324,42 @@ int main(int argc, char *argv[])
             }
             else {
                 //Create a new connection to web server
-                int server_socket = socket(AF_INET, SOCK_STREAM, 0);
-                if (server_socket == -1) {
-                    perror("Socket creation failed");
-                    exit(1);
-                }
+
                 int server_addr_index = cli_socket_index % server_num; //Round-Robin Load Balancer
 
-                struct sockaddr_in server_address;
-                memset(&server_address, 0, sizeof(server_address));
-                server_address.sin_family = AF_INET;
-                server_address.sin_port = htons(80);
-                server_address.sin_addr.s_addr = server_addrs[server_addr_index];
-                if (connect(server_socket, (struct sockaddr *)&server_address, sizeof(server_address)) == -1) {
-                    perror("Connection failed");
-                    close(server_socket);
+                int server_socket;
+                struct addrinfo hints, *servinfo, *p;
+                int rv;
+
+                memset(&hints, 0, sizeof hints);
+                hints.ai_family = AF_UNSPEC;
+                hints.ai_socktype = SOCK_STREAM;
+
+                if((rv = getaddrinfo(ip_addresses[server_addr_index], "80", &hints, &servinfo)) != 0) {
+                    perror("getaddrinfo");
                     exit(1);
-                }      
+                }
+
+                for(p = servinfo; p != NULL; p = p->ai_next){
+                    if((server_socket = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+                        perror("client: socket");
+                        continue;
+                    }
+
+                    if(connect(server_socket, p->ai_addr, p->ai_addrlen) == -1) {
+                        close(server_socket);
+                        perror("clinet: connect");
+                        continue;
+                    }
+                    break;
+                }
+
+                if (p == NULL) {
+                    perror("clinet: failed to connect");
+                    return -1;
+                }
+
+                freeaddrinfo(servinfo);
 
                 client_sockets[cli_socket_index] = browser_listen_socket;
                 server_sockets[cli_socket_index] = server_socket;
